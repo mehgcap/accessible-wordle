@@ -1,268 +1,257 @@
 'use strict';
 
-let s = () => {
+let a11yFix = () => {
 
 let setAttribute = (elem, attr, value) => {
     elem.setAttribute(attr, value);
 }
 
-let myQueryHelper = (elem, query, results) => {
-    if (elem.className.toString().indexOf(query) >= 0) {
-        results.push(elem);
-    }
-    for (let child = elem.firstElementChild; child; child = child.nextElementSibling) {
-        myQueryHelper(child, query, results);
-    }
+let shadowQuery = (elem, query) => {
+	let root = elem.shadowRoot;
+	return !root ? null : root.querySelector(query);
 };
 
-let myQuery = (elem, query) => {
-    let results = [];
-    myQueryHelper(elem, query, results);
-    return results[0] || null;
+let shadowQueryAll = (elem, query) => {
+	let root = elem.shadowRoot;
+	return !root ? [] : root.querySelectorAll(query);
 };
 
-let myQueryAll = (elem, query) => {
-    let results = [];
-    myQueryHelper(elem, query, results);
-    return results;
+let getElementByClassStart = (classString, root=null) => {
+	let searchRoot = root ? root : document;
+	let queryString = '[class^=\"' + classString + '\"]';
+	return searchRoot.querySelector(queryString);
+};
+
+let getElementsByClassStart = (classString, root=null) => {
+	let searchRoot = root ? root : document;
+	let queryString = '[class^=\"' + classString + '\"]';
+	return searchRoot.querySelectorAll(queryString);
 };
 
 let fix = (elem, makeClickable, role, label) => {
-    if (role) {
-        if (role == 'tile') {
-            setAttribute(elem, 'role', 'img');
-            setAttribute(elem, 'aria-roledescription', 'tile');
-        } else {
-            setAttribute(elem, 'role', role);
-        }
-        if (role == 'dialog') {
-            setAttribute(elem, 'aria-modal', false);
-        }
-    }
+	if (role) {
+		if (role == 'tile') {
+			setAttribute(elem, 'role', 'img');
+			setAttribute(elem, 'aria-roledescription', 'tile');
+		} else {
+			setAttribute(elem, 'role', role);
+		}
+		if (role == 'dialog') {
+			setAttribute(elem, 'aria-modal', false);
+		}
+	}
 
-    if (label) {
-        setAttribute(elem, 'aria-label', label);
-    }
-    
-    if (makeClickable) {
-        if (elem.tabIndex == 0)
-            return;
+	if (label) {
+		setAttribute(elem, 'aria-label', label);
+	}
 
-        elem.tabIndex = 0;
-        elem.addEventListener('keydown', (e) => {
-            if (e.code == 'Enter' || e.code == 'Space') {
-                e.stopPropagation();
-                e.preventDefault();
-                let switchChild = myQuery(elem, 'div.switch');
-                if (switchChild) {
-                    switchChild.click();
-                } else {
-                    elem.click();
-                }
-            }
-        }, false);
-    }
+	if (makeClickable) {
+		if (elem.tabIndex == 0)
+			return;
+
+		elem.tabIndex = 0;
+		elem.addEventListener('keydown', (e) => {
+			if (e.code == 'Enter' || e.code == 'Space') {
+				e.stopPropagation();
+				e.preventDefault();
+				let switchChild = shadowQuery(elem, 'div.switch');
+				if (switchChild) {
+					switchChild.click();
+				} else {
+					elem.click();
+				}
+			}
+		}, false);
+	}
 }
 
 let masterFixer = (elem) => {
-    let newLabel = '';
-    ['letter', 'evaluation', 'data-key', 'data-state'].forEach(attr => {
-        let value = elem.getAttribute(attr);
-        if (value && value != '←' && value != 'tbd') {
-            newLabel += ' ' + value;
-        }
-    });
-    newLabel = elem.textContent + newLabel;
-    if (newLabel != '' && newLabel != elem.getAttribute('aria-label')) {
-        console.log('Setting ' + elem.getAttribute('role') + ' to ' + newLabel);
-        setAttribute(elem, 'aria-label', newLabel);
+	let newLabel = '';
+	['letter', 'evaluation', 'data-key'].forEach(attr => {
+		let value = elem.getAttribute(attr);
+		if (value) {
+			newLabel += ' ' + value;
+		}
+	});
+	if (newLabel != elem.getAttribute('aria-label')) {
+		setAttribute(elem, 'aria-label', newLabel);
     }
 };
 
-let fixAllTiles = (root) => {
-    let tiles = myQueryAll(root, 'Tile-module');
-    console.log('Tiles: ' + tiles.length);
-    for (let j = 0; j < tiles.length; j++) {
-        fix(tiles[j], true, 'tile', 'Tile');
-        masterFixer(tiles[j]);
-    }
+let createGameBoard = function() {
+	let board = getElementByClassStart("Board-module_board_");
+	if(!board) {
+		console.log("Could not find the game board element.");
+		alert("Could not find the game board element. This script won't work properly, as something must have changed in Wordle's code.");
+		return;
+	}
+	//turn the board into a table
+	setAttribute(board, "role", "table");
+	let rows = getElementsByClassStart("Row-module_row_");
+	if(!rows) {
+		console.log("Could not find any rows.");
+		return;
+	}
+	rows.forEach(elem => {
+		setAttribute(elem, "role", "row");
+	});
+	let cells = getElementsByClassStart("Tile-module_tile_");
+	if(!cells) {
+		console.log("Could not find any tiles.");
+		return;
+	}
+	cells.forEach(elem => {
+		//set the label to the letter and the state (correct, empty, absent, etc)
+		updateTileLabel(elem);
+		let newSpan = document.createElement("span");
+		newSpan.innerText = elem.getAttribute("aria-label");
+		//elem.parentElement.appendChild(newSpan);
+		//give the parent div of this cell, which is empty, the same label as the cell
+		setAttribute(elem.parentElement, "aria-label", elem.getAttribute("aria-label"));
+		setAttribute(elem.parentElement, "role", "cell");
+		setAttribute(elem, 'aria-live', 'polite');
+	});
+};
+
+let updateTileLabel = function(tile) {
+	let letter = tile.innerText ? tile.innerText.substring(0, 1) : null;
+	let status = tile.getAttribute("data-state");
+	//this results in something like "S absent"
+	let label = letter ? `${letter} ${status}` : "Blank";
+	//setAttribute(tile, "aria-label", label);
+	tile.innerText = label;
 };
 
 let masterObserver = new MutationObserver((mutationsList, observer) => {
-    for (let mutation of mutationsList) {
-        masterFixer(mutation.target);
-    }
+	for (let mutation of mutationsList) {
+		masterFixer(mutation.target);
+	}
 });
-
-let watchTile = (tile) => {
-    fix(tile, false, 'tile', 'Empty');
-    masterFixer(tile);
-    masterObserver.observe(tile, { attributes: true });
-    setTimeout(() => {
-        setAttribute(tile, 'aria-live', 'polite');
-    }, 1000);
-}
 
 let watchKey = (key) => {
     masterObserver.observe(key, { attributes: true });
 }
 
 let checkboxObserver = new MutationObserver((mutationsList, observer) => {
-    for (let mutation of mutationsList) {
-        let checkbox = mutation.target;
-        let newAttr = '' + checkbox.hasAttribute('checked');
-        if (newAttr != checkbox.getAttribute('aria-checked')) {
-            setAttribute(checkbox, 'aria-checked', newAttr);
-        }
-    }
+	for (let mutation of mutationsList) {
+		let checkbox = mutation.target;
+		let newAttr = '' + checkbox.hasAttribute('checked');
+		if (newAttr != checkbox.getAttribute('aria-checked')) {
+			setAttribute(checkbox, 'aria-checked', newAttr);
+		}
+	}
 });
 
 let watchCheckbox = (checkbox) => {
-    if (!checkbox.hasAttribute('aria-checked')) {
-        fix(checkbox, true, 'checkbox', checkbox.getAttribute('name'));
-        setAttribute(checkbox, 'aria-checked',
-                              checkbox.hasAttribute('checked'));
-    }
-    checkboxObserver.observe(checkbox, { attributes: true });
-}
-
-let app;
-let previousModalState;
-let firstKey;
-
-let fixDialog = (dialog) => {
-    fix(dialog, false, 'dialog', 'Game Modal');
-    setTimeout(() => {
-        console.log('Fixing dialog');
-
-        let close = myQuery(dialog, 'close');
-	if (close) {
-            fix(close, true, 'button', 'Close');
+	if (!checkbox.hasAttribute('aria-checked')) {
+		fix(checkbox, true, 'checkbox', checkbox.getAttribute('name'));
+		setAttribute(checkbox, 'aria-checked',
+		checkbox.hasAttribute('checked'));
 	}
+	checkboxObserver.observe(checkbox, { attributes: true });
+};
 
-        // Inside game page could be either settings or help.
-        let gameSettings = myQuery(app, 'Settings-module_setting');
-        if (gameSettings) {
-            gameSettings = gameSettings.parentElement;
-            setAttribute(dialog, 'aria-label', 'Settings Modal');
-            let checkboxes = myQueryAll(gameSettings, 'Settings-module_setting');
-            for (let i = 0; i < checkboxes.length; i++)
-                watchCheckbox(checkboxes[i]);
-
-            let checkbox = myQuery(gameSettings, 'Settings-module_setting');
-            if (checkbox) {
-                checkbox.focus();
-		return;
-            }
-        }
-
-        let help = myQuery(app, 'Help-module_instructions');
-        if (help) {
-            setAttribute(dialog, 'aria-label', 'Help Modal');
-
-            fixAllTiles(help);
-        }
-
-        if (close) {
-	    close.focus();
-        }
-
-    }, 500);
-}
-
-let dialogObserver = new MutationObserver((mutationsList, observer) => {
-    let target = mutationsList[0].target;
-
-    setTimeout(() => {
-	let dialog = myQuery(target, 'Page-module_page');
-	if (dialog) {
-	    fixDialog(dialog);
-	    return;
-	}
-	dialog = myQuery(target, 'Modal-module_modalOverlay');
-	if (dialog) {
-	    fixDialog(dialog);
-	    return;
-	}
-
-        if (firstKey) {
-            firstKey.focus();
-	}
-    }, 500);
+let gamePageObserver = new MutationObserver((mutationsList, observer) => {
+	let appModule = getElementByClassStart("app-module_game__");
+	console.log('GamePage changed.');
+	setTimeout(() => {
+		//if this is ever set to true, we will try to fix and then focus on a close button
+		let fixCloseButton = false;
+		mutationsList.forEach((mutation) => {
+			//if the child list changed, see about toasts or modal dialogs
+			if(mutation.type == "childList") {
+				//set up a toast if one was added
+				let toasters = getElementsByClassStart("Toaster-module", mutation.target);
+				console.log('Toasters: ' + toasters.length);
+				for (let i = 0; i < toasters.length; i++) {
+					setAttribute(toasters[i], 'aria-live', 'polite');
+				}
+				//check for a help dialog
+				let help = getElementByClassStart("Page-module_page__", appModule);
+				console.log('Game help: ' + help);
+				if (help) {
+					//setAttribute(gamePage, 'aria-label', 'Help Modal');
+					fixCloseButton = true;
+				}
+			} else if(mutation.type == "attributes") {
+				//if the mutation happened to a tile, update its label and its parent
+				if(getElementByClassStart("Tile-module_tile__", mutation.target.parentElement)) {
+					//only update if the value changed, else we'll enter an infinite loop
+					if(mutation.attributeName == "data-state" && mutation.oldValue != mutation.target.getAttribute(mutation.attributeName)) {
+						console.log(`Updating a tile. Attribute: ${mutation.attributeName}. Old value: ${mutation.oldValue}. Tile's value: ${mutation.target.getAttribute(mutation.attributeName)}`);
+						updateTileLabel(mutation.target);
+					} else {
+						console.log(`Not updating a tile. Attribute: ${mutation.attributeName}. Old value: ${mutation.oldValue}. Tile's value: ${mutation.target.getAttribute(mutation.attributeName)}`);
+						return;
+					}
+				}
+			}
+			if(fixCloseButton) {
+				let closeButton = getElementByClassStart("Page-module_close__") || getElementByClassStart("Modal-module_close__");
+				if (closeButton) {
+					console.log('Close: ' + closeButton);
+					//give the button a useful name
+					closeButton.innerText = "Close";
+					//now hide the SVG
+					setAttribute(document.getElementsByClassName("game-icon")[0], "aria-hidden", "true");
+					closeButton.focus();
+				}
+			}
+		});
+	}, 500);
 });
 
-let watchForDialogs = (app) => {
-    dialogObserver.observe(app, { childList: true });
+let watchGamePage = (gamePage) => {
+	gamePageObserver.observe(gamePage,  {
+		attributes: true,
+		subtree: true
+	});
 };
 
 let applyFixes = () => {
-    app = myQuery(document.body, 'App-module_game');
-    console.log('App: ' + app);
-    if (app) {
-        let header = myQuery(document.body, 'AppHeader-module_appHeader');
-        if (header) {
-            var buttons = header.querySelectorAll('[tabindex]');
-            buttons.forEach(button => button.setAttribute('tabIndex', 0));
-        }
-
-        watchForDialogs(app);
-
-        let dialog = myQuery(app, 'Modal-module_modalOverlay');
-	if (dialog) {
-	    fixDialog(dialog);
+	try {
+		//set up the board as a table, set the tile labels, and other setup
+		createGameBoard();
+	} catch(error) {
+		alert(error);
+		return;
 	}
 
-        let help = myQuery(app, 'Help-module_page');
-        if (help) {
-            fixAllTiles(help);
-        }
+	let gamePage = getElementByClassStart("App-module_game__");
+	console.log('Game page: ' + gamePage);
+	watchGamePage(gamePage);
 
-        let toasters = myQueryAll(app, 'ToastContainer-module_toaster');
-        for (let i = 0; i < toasters.length; i++) {
-            setAttribute(toasters[i], 'aria-live', 'polite');
-        }
+	let keyboard = getElementByClassStart("Keyboard-module_keyboard__");
+	if(keyboard) {
+		console.log('Keyboard: ' + keyboard);
+		fix(keyboard, false, 'group', 'Keyboard');
+		let keys = getElementByClassStart("Key-module_key__", keyboard);
+		console.log('Keys: ' + keys.length);
+		for (let i = 0; i < keys.length; i++) {
+			if (!firstKey) {
+				firstKey = keys[i];
+			}
+			watchKey(keys[i]);
+		}
+		let backspace = document.querySelector('button[data-key="←"]');
+		console.log('Backspace: ' + backspace);
+		fix(backspace, false, null, 'backspace');
+	}
 
-        let keyboard = myQuery(app, 'Keyboard-module_keyboard');
-        console.log('Keyboard: ' + keyboard);
-        fix(keyboard, false, 'group', 'Keyboard');
+	let tiles = getElementsByClassStart("Tile-module_tile__");
+	console.log('Tiles: ' + tiles.length);
+	for (let j = 0; j < tiles.length; j++) {
+	}
 
-        let keys = myQueryAll(keyboard, 'Key-module_key');
-        console.log('Keys: ' + keys.length);
-        for (let i = 0; i < keys.length; i++) {
-            if (!firstKey) {
-                firstKey = keys[i];
-            }
-            watchKey(keys[i]);
-        }
-
-        for (var i = 0; i < keys.length; i++) {
-            if (keys[i].getAttribute('data-key') == '←') {
-                fix(keys[i], false, null, 'backspace');
-            }
-        }
-
-        let rows = myQueryAll(app, 'Row-module_row');
-        console.log('Rows: ' + rows.length);
-        for (let i = 0; i < rows.length; i++) {
-            fix(rows[i], false, 'group', 'Row ' + (i + 1));
-
-            let tiles = myQueryAll(rows[i], 'Tile-module_tile');
-            for (let j = 0; j < tiles.length; j++) {
-                watchTile(tiles[j]);
-            }
-        }
-
-        let extensionCredit = document.createElement('p');
-        extensionCredit.style.color = 'var(--color-tone-1)';
-        extensionCredit.innerHTML = 'Wordle screen reader accessibility extension running.';
-        rows[rows.length - 1].parentElement.appendChild(extensionCredit);
-    }
+	let extensionCredit = document.createElement('div');
+	extensionCredit.innerHTML = 'Wordle screen reader accessibility extension running.';
+	gamePage.insertBefore(extensionCredit, gamePage.firstChild);
 };
 
 setTimeout(() => {
-    applyFixes();
+	applyFixes();
 }, 1000);
 
 };
-s();
+a11yFix();
 
